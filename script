@@ -1,0 +1,70 @@
+import pandas as pd
+
+# ── CONFIG ──────────────────────────────────────────────────────────────────
+INPUT_FILE  = 'mailing_list.csv'
+OUTPUT_FILE = 'mailing_list_cleaned.csv'
+
+# Keywords to remove from Address 1 (add/remove as needed)
+ADDRESS1_REMOVE_KEYWORDS = ['chesire', 'cheshire', 'whittemore farm rd']
+
+# Street addresses to remove from Address 1 (exact or partial)
+ADDRESS1_REMOVE_STREETS = ['402 Geyser Rd']
+
+# Name tags to remove entries entirely (e.g. employee tags)
+NAME_TAG_REMOVE = r'[\*\-]EMP'
+
+# Name tags to strip from customer name (keep entry, just clean the tag)
+NAME_TAG_STRIP = r'\s*\*C$'
+# ────────────────────────────────────────────────────────────────────────────
+
+
+df = pd.read_csv(INPUT_FILE)
+print(f"Starting rows: {len(df)}")
+
+# 1. Remove blank rows
+df = df.dropna(how='all')
+
+# 2. Remove full duplicate rows
+df = df.drop_duplicates()
+
+# 3. Remove entries by keyword in Address 1
+for keyword in ADDRESS1_REMOVE_KEYWORDS:
+    mask = df['Address 1'].str.contains(keyword, case=False, na=False)
+    print(f"  Removing {mask.sum()} rows with '{keyword}' in Address 1")
+    df = df[~mask]
+
+# 4. Remove entries by specific street in Address 1
+for street in ADDRESS1_REMOVE_STREETS:
+    mask = df['Address 1'].str.contains(street, case=False, na=False)
+    print(f"  Removing {mask.sum()} rows with '{street}' in Address 1")
+    df = df[~mask]
+
+# 5. Remove employee-tagged entries
+mask = df['Customer Name'].str.contains(NAME_TAG_REMOVE, case=False, na=False)
+print(f"  Removing {mask.sum()} employee-tagged entries")
+df = df[~mask]
+
+# 6. Strip *C (or other) tags from Customer Name
+df['Customer Name'] = df['Customer Name'].str.replace(NAME_TAG_STRIP, '', case=False, regex=True)
+
+# 7. Fix entries where Address 1 is a label/name — move Address 2 into Address 1
+mask = (df['Address 1'].isna() | (df['Address 1'] == '')) & df['Address 2'].notna()
+print(f"  Moving Address 2 → Address 1 for {mask.sum()} entries with blank Address 1")
+df.loc[mask, 'Address 1'] = df.loc[mask, 'Address 2']
+df.loc[mask, 'Address 2'] = ''
+
+# 8. Clear Address 2 where Address 1 is a PO Box
+mask = df['Address 1'].str.contains(r'PO BOX', case=False, na=False) & df['Address 2'].notna() & (df['Address 2'] != '')
+print(f"  Clearing Address 2 for {mask.sum()} PO Box entries")
+df.loc[mask, 'Address 2'] = ''
+
+# 9. Deduplicate by Customer Number — keep entry with email if available
+df['has_email'] = df['Email Address'].notna() & (df['Email Address'] != '')
+df = df.sort_values('has_email', ascending=False)
+df = df.drop_duplicates(subset='Customer Number', keep='first')
+df = df.drop(columns='has_email')
+df = df.sort_index()
+
+print(f"Final rows: {len(df)}")
+df.to_csv(OUTPUT_FILE, index=False)
+print(f"Saved to {OUTPUT_FILE}")
