@@ -3,43 +3,161 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Clean Mailing List</title>
+  <title>Mailing List Cleaner</title>
   <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px;max-width:980px}
-    header{display:flex;align-items:center;gap:16px}
-    .controls{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
-    table{border-collapse:collapse;width:100%;margin-top:12px}
-    th,td{border:1px solid #ddd;padding:6px;font-size:13px}
-    pre{background:#f6f8fa;padding:8px;border-radius:6px}
-    button:disabled{opacity:.5}
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 40px;
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #1a1a1a;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 32px;
+    }
+    .section {
+      margin-bottom: 32px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+      margin-bottom: 12px;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    input[type="file"] {
+      font-size: 14px;
+      padding: 8px 0;
+    }
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      border: 1px solid #ddd;
+      background: white;
+      color: #333;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button:hover:not(:disabled) {
+      background: #f0f0f0;
+      border-color: #999;
+    }
+    button.primary {
+      background: #0969da;
+      color: white;
+      border-color: #0969da;
+    }
+    button.primary:hover:not(:disabled) {
+      background: #0860ca;
+      border-color: #0860ca;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .stats {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #333;
+      line-height: 1.6;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 16px;
+    }
+    th {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      padding: 10px 12px;
+      text-align: left;
+      font-weight: 600;
+      color: #333;
+    }
+    td {
+      border: 1px solid #d0d7de;
+      padding: 8px 12px;
+      color: #333;
+    }
+    tr:nth-child(even) {
+      background: #fafbfc;
+    }
+    tr:hover {
+      background: #f0f0f0;
+    }
+    .preview-info {
+      font-size: 13px;
+      color: #666;
+      margin-top: 12px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+    }
   </style>
-  <!-- PapaParse for robust CSV parsing -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
-  <header>
+  <div class="container">
     <h1>Mailing List Cleaner</h1>
-  </header>
+    <p class="subtitle">Upload a CSV to remove duplicates, invalid addresses, and apply cleaning rules.</p>
 
-  <p>Upload a CSV; the cleaner runs in your browser and produces a cleaned CSV for download.</p>
+    <div class="section">
+      <div class="section-title">Upload</div>
+      <div class="controls">
+        <input id="fileInput" type="file" accept=".csv,text/csv" />
+        <button id="processBtn" class="primary" disabled>Process</button>
+        <button id="downloadBtn" disabled>Download CSV</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+    </div>
 
-  <div class="controls">
-    <input id="fileInput" type="file" accept=".csv,text/csv" />
-    <button id="processBtn" disabled>Process upload</button>
-    <button id="downloadBtn" disabled>Download cleaned CSV</button>
-    <button id="resetBtn">Reset</button>
+    <div id="statsSection" class="section" style="display:none;">
+      <div class="section-title">Summary</div>
+      <div id="stats" class="stats"></div>
+    </div>
+
+    <div id="previewSection" class="section" style="display:none;">
+      <div class="section-title">Preview</div>
+      <div id="preview"></div>
+    </div>
   </div>
 
-  <div id="stats" style="margin-top:12px"></div>
-
-  <div id="preview"></div>
-
   <script>
-    // Configuration - edit as needed
-    const ADDRESS1_REMOVE_KEYWORDS = ['PARKING', 'LOADING DOCK', 'DO NOT DELIVER', 'ATTN: DO NOT DELIVER']; // case-insensitive substrings
-    const ADDRESS1_REMOVE_STREETS = ['ALLEY', 'CTY RD', 'COUNTY ROAD']; // substrings to drop rows
-    const NAME_TAG_REMOVE = ['EMPLOYEE', 'DOOR TAG']; // names that should be removed entirely (exact or contains)
-    const NAME_TAG_STRIP = ['(O-C)']; // substrings to strip from Customer Name (row kept)
+    const ADDRESS1_REMOVE_KEYWORDS = ['PARKING', 'LOADING DOCK', 'DO NOT DELIVER', 'ATTN: DO NOT DELIVER'];
+    const ADDRESS1_REMOVE_STREETS = ['ALLEY', 'CTY RD', 'COUNTY ROAD'];
+    const NAME_TAG_REMOVE = ['EMPLOYEE', 'DOOR TAG'];
+    const NAME_TAG_STRIP = ['(O-C)'];
     const PO_BOX_PATTERNS = [/PO BOX/i, /P\.?O\.? BOX/i];
 
     const fileInput = document.getElementById('fileInput');
@@ -48,6 +166,8 @@
     const resetBtn = document.getElementById('resetBtn');
     const stats = document.getElementById('stats');
     const preview = document.getElementById('preview');
+    const statsSection = document.getElementById('statsSection');
+    const previewSection = document.getElementById('previewSection');
 
     let parsedRows = [];
     let headers = [];
@@ -56,14 +176,15 @@
     fileInput.addEventListener('change', () => {
       processBtn.disabled = !fileInput.files.length;
       downloadBtn.disabled = true;
-      stats.textContent = '';
-      preview.innerHTML = '';
+      statsSection.style.display = 'none';
+      previewSection.style.display = 'none';
     });
 
     processBtn.addEventListener('click', () => {
       const file = fileInput.files[0];
       if (!file) return;
-      stats.textContent = 'Parsing CSV...';
+      stats.innerHTML = '<p>Parsing CSV...</p>';
+      statsSection.style.display = 'block';
       Papa.parse(file, {
         header: true,
         skipEmptyLines: false,
@@ -71,14 +192,18 @@
         complete: result => {
           headers = result.meta.fields || [];
           parsedRows = result.data || [];
-          stats.textContent = `Parsed ${parsedRows.length} rows (headers: ${headers.join(', ') || '[none]'})`;
           cleanedRows = cleanRows(parsedRows, headers);
+          const removed = parsedRows.length - cleanedRows.length;
+          stats.innerHTML = `
+            <strong>Parsed:</strong> ${parsedRows.length} rows<br>
+            <strong>Cleaned:</strong> ${cleanedRows.length} rows<br>
+            <strong>Removed:</strong> ${removed} rows
+          `;
           showPreview(cleanedRows, headers);
           downloadBtn.disabled = false;
-          stats.innerHTML = `${stats.innerHTML}<br>Cleaned rows: ${cleanedRows.length}`;
         },
         error: err => {
-          stats.textContent = 'Error parsing CSV: ' + err.message;
+          stats.innerHTML = '<p style="color:red;">Error parsing CSV: ' + err.message + '</p>';
         }
       });
     });
@@ -90,8 +215,8 @@
       headers = [];
       processBtn.disabled = true;
       downloadBtn.disabled = true;
-      stats.textContent = '';
-      preview.innerHTML = '';
+      statsSection.style.display = 'none';
+      previewSection.style.display = 'none';
     });
 
     downloadBtn.addEventListener('click', () => {
@@ -108,12 +233,9 @@
       URL.revokeObjectURL(url);
     });
 
-    // Cleaning logic
     function cleanRows(rows, hdrs){
-      // Normalize header names we expect; fallback to common variants
       const field = f => {
         const map = hdrs.reduce((m,k)=>{m[k.toLowerCase().trim()]=k; return m;}, {});
-        const keys = Object.keys(map);
         const lookup = name => map[name.toLowerCase()] || map[name.toLowerCase().replace(/\s+/g,' ')] || null;
         return lookup(f.toLowerCase()) || lookup(f) || f;
       };
@@ -125,12 +247,7 @@
         email: field('Email Address')
       };
 
-      // 1) remove blank rows (all fields empty)
-      let filtered = rows.filter(r => {
-        return Object.values(r).some(v => (v !== null && v !== undefined && String(v).trim() !== ''));
-      });
-
-      // 2) remove full duplicate rows (exact same content)
+      let filtered = rows.filter(r => Object.values(r).some(v => (v !== null && v !== undefined && String(v).trim() !== '')));
       const seenFull = new Set();
       filtered = filtered.filter(r => {
         const key = JSON.stringify(r);
@@ -139,7 +256,6 @@
         return true;
       });
 
-      // 3) filter by Address 1 keywords / streets
       filtered = filtered.filter(r => {
         const a1 = String(r[FN.a1] || '').toUpperCase();
         if (!a1) return true;
@@ -152,7 +268,6 @@
         return true;
       });
 
-      // 4) remove rows where Customer Name matches NAME_TAG_REMOVE
       filtered = filtered.filter(r => {
         const nm = String(r[FN.name] || '').toUpperCase();
         if (!nm) return true;
@@ -162,7 +277,6 @@
         return true;
       });
 
-      // 5) strip NAME_TAG_STRIP substrings from Customer Name
       filtered.forEach(r => {
         let nm = String(r[FN.name] || '');
         for (const s of NAME_TAG_STRIP) {
@@ -171,7 +285,6 @@
         r[FN.name] = nm;
       });
 
-      // 6) Move Address2 -> Address1 if Address1 empty
       filtered.forEach(r => {
         const a1 = String(r[FN.a1] || '').trim();
         const a2 = String(r[FN.a2] || '').trim();
@@ -181,7 +294,6 @@
         }
       });
 
-      // 7) If Address1 contains PO BOX and Address2 present, clear Address2
       filtered.forEach(r => {
         const a1 = String(r[FN.a1] || '');
         const a2 = String(r[FN.a2] || '');
@@ -195,12 +307,10 @@
         }
       });
 
-      // 8) Deduplicate by Customer Number, prefer row with Email Address
       const groups = new Map();
       filtered.forEach(r => {
         const id = String(r[FN.num] || '').trim();
         if (!id) {
-          // keep rows without Customer Number as-is, use unique key
           const tempKey = `__noid__${Math.random().toString(36).slice(2,9)}`;
           groups.set(tempKey, r);
           return;
@@ -210,17 +320,15 @@
           const existing = groups.get(id);
           const existingHasEmail = String(existing[FN.email] || '').trim() !== '';
           const rHasEmail = String(r[FN.email] || '').trim() !== '';
-          if (!existingHasEmail && rHasEmail) groups.set(id, r); // prefer email
+          if (!existingHasEmail && rHasEmail) groups.set(id, r);
         }
       });
 
-      // Build final array in original order as much as possible
       const final = [];
       const used = new Set();
       filtered.forEach(r => {
         const id = String(r[FN.num] || '').trim();
         if (!id) {
-          // unique key rows were inserted in groups with random keys; include them
           const key = [...groups.entries()].find(([k,v]) => v === r)?.[0];
           if (key && !used.has(key)) { final.push(r); used.add(key); }
           return;
@@ -232,23 +340,24 @@
         }
       });
 
-      // If headers had extra fields not in rows, ensure output keys match original header order
       return final;
     }
 
     function showPreview(rows, hdrs){
       preview.innerHTML = '';
+      previewSection.style.display = 'block';
       if (!rows.length){
-        preview.innerHTML = '<p>No rows after cleaning.</p>';
+        preview.innerHTML = '<p class="empty-state">No rows after cleaning.</p>';
         return;
       }
       const table = document.createElement('table');
       const thead = document.createElement('thead');
       const trh = document.createElement('tr');
-      // Use headers from parsed file if available, else infer from first row
       const cols = hdrs.length ? hdrs : Object.keys(rows[0]);
       cols.forEach(c => {
-        const th = document.createElement('th'); th.textContent = c; trh.appendChild(th);
+        const th = document.createElement('th');
+        th.textContent = c;
+        trh.appendChild(th);
       });
       thead.appendChild(trh);
       table.appendChild(thead);
@@ -269,6 +378,7 @@
       preview.appendChild(table);
       if (rows.length > 100){
         const p = document.createElement('p');
+        p.className = 'preview-info';
         p.textContent = `Showing first 100 of ${rows.length} rows.`;
         preview.appendChild(p);
       }
