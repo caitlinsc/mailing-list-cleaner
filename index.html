@@ -124,6 +124,19 @@
       padding: 40px 20px;
       color: #666;
     }
+    .credit-footer {
+      max-width: 1200px;
+      margin: 24px auto 0;
+      text-align: center;
+      color: #888;
+      font-size: 12px;
+    }
+    .credit-footer a {
+      color: #888;
+    }
+    .credit-footer a:hover {
+      color: #0969da;
+    }
   </style>
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
@@ -152,6 +165,10 @@
       <div id="preview"></div>
     </div>
   </div>
+
+  <footer class="credit-footer">
+    Built by <a href="https://github.com/caitlinsc">caitlinsc</a> on GitHub
+  </footer>
 
   <script>
     const ADDRESS1_REMOVE_KEYWORDS = ['PARKING', 'LOADING DOCK', 'DO NOT DELIVER', 'ATTN: DO NOT DELIVER'];
