@@ -1,6 +1,6 @@
 # Clean Mailing List — HTML version
 
-This folder contains your original `clean_mailing_list.py` script and a browser-based HTML tool `clean_mailing_list.html` that reproduces the same cleaning steps client-side.
+- This folder contains a browser-based HTML tool `clean_mailing_list.html` that performs mailing list cleaning client-side.
 
 What the HTML does
 - Accepts a CSV file (drag & drop via the file chooser) with columns including: `Customer Number`, `Customer Name`, `Address 1`, `Address 2`, `Email Address`.
