@@ -5,188 +5,274 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Clean Mailing List</title>
   <style>
-    body{font-family:Segoe UI,Arial,Helvetica,sans-serif;margin:20px}
-    .container{max-width:900px;margin:0 auto}
-    textarea{width:100%;height:200px;font-family:monospace}
-    table{width:100%;border-collapse:collapse;margin-top:10px}
-    th,td{border:1px solid #ddd;padding:6px;text-align:left}
-    th{background:#f4f4f4}
-    .rowcount{margin-top:8px}
-    .controls{display:flex;gap:8px;align-items:center}
-    .small{font-size:0.9em;color:#555}
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px;max-width:980px}
+    header{display:flex;align-items:center;gap:16px}
+    .controls{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+    table{border-collapse:collapse;width:100%;margin-top:12px}
+    th,td{border:1px solid #ddd;padding:6px;font-size:13px}
+    pre{background:#f6f8fa;padding:8px;border-radius:6px}
+    button:disabled{opacity:.5}
   </style>
+  <!-- PapaParse for robust CSV parsing -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
-  <div class="container">
-    <h1>Clean Mailing List (browser)</h1>
-    <p class="small">Drop or choose a CSV file with columns including: <code>Customer Number</code>, <code>Customer Name</code>, <code>Address 1</code>, <code>Address 2</code>, <code>Email Address</code>.</p>
+  <header>
+    <h1>Mailing List Cleaner</h1>
+  </header>
 
-    <div class="controls">
-      <input id="file" type="file" accept="text/csv" />
-      <button id="process">Process</button>
-      <button id="download" disabled>Download Cleaned CSV</button>
-      <span id="status" class="small"></span>
-    </div>
+  <p>Upload a CSV; the cleaner runs in your browser and produces a cleaned CSV for download.</p>
 
-    <div class="rowcount" id="counts"></div>
-
-    <div id="preview"></div>
+  <div class="controls">
+    <input id="fileInput" type="file" accept=".csv,text/csv" />
+    <button id="processBtn" disabled>Process upload</button>
+    <button id="downloadBtn" disabled>Download cleaned CSV</button>
+    <button id="resetBtn">Reset</button>
   </div>
 
+  <div id="stats" style="margin-top:12px"></div>
+
+  <div id="preview"></div>
+
   <script>
-    // Mirror of the python cleaning logic but in-browser using JS
-    // Config
-    const ADDRESS1_REMOVE_KEYWORDS = ['chesire','cheshire','whittemore farm rd'];
-    const ADDRESS1_REMOVE_STREETS = ['402 Geyser Rd'];
-    const NAME_TAG_REMOVE = /[\*\-]EMP/i; // remove entire row
-    const NAME_TAG_STRIP = /\s*\*C$/i; // strip from customer name
+    // Configuration - edit as needed
+    const ADDRESS1_REMOVE_KEYWORDS = ['PARKING', 'LOADING DOCK', 'DO NOT DELIVER', 'ATTN: DO NOT DELIVER']; // case-insensitive substrings
+    const ADDRESS1_REMOVE_STREETS = ['ALLEY', 'CTY RD', 'COUNTY ROAD']; // substrings to drop rows
+    const NAME_TAG_REMOVE = ['EMPLOYEE', 'DOOR TAG']; // names that should be removed entirely (exact or contains)
+    const NAME_TAG_STRIP = ['(O-C)']; // substrings to strip from Customer Name (row kept)
+    const PO_BOX_PATTERNS = [/PO BOX/i, /P\.?O\.? BOX/i];
 
-    function csvToArray(text) {
-      // Simple CSV parse using split+line parse; assumes no embedded newlines in fields
-      const lines = text.split(/\r?\n/).filter(l=>l.trim()!="");
-      if(lines.length===0) return {headers:[],rows:[]};
-      const headers = lines[0].split(',').map(h=>h.trim());
-      const rows = lines.slice(1).map(line=>{
-        const parts = line.split(',');
-        const obj = {};
-        headers.forEach((h,i)=> obj[h]= (parts[i] !== undefined ? parts[i].trim() : ''));
-        return obj;
-      });
-      return {headers,rows};
-    }
-
-    function arrayToCSV(headers, rows){
-      const esc = v => (v==null? '': String(v)).replace(/"/g,'""');
-      const wrap = v => '"'+esc(v)+'"';
-      const lines = [headers.map(wrap).join(',')];
-      for(const r of rows){
-        lines.push(headers.map(h=>wrap(r[h] ?? '')).join(','));
-      }
-      return lines.join('\r\n');
-    }
-
-    function processRows(headers, rows){
-      // Work on a shallow copy
-      let data = rows.map(r=> ({...r}));
-
-      const initialCount = data.length;
-
-      // 1. Remove blank rows (all empty values)
-      data = data.filter(r => Object.values(r).some(v=> v !== null && String(v).trim() !== ''));
-
-      // 2. Remove full duplicate rows
-      const seenFull = new Set();
-      data = data.filter(r=>{
-        const key = headers.map(h=>r[h]??'').join('||');
-        if(seenFull.has(key)) return false; seenFull.add(key); return true;
-      });
-
-      // 3. Remove entries by keyword in Address 1
-      for(const keyword of ADDRESS1_REMOVE_KEYWORDS){
-        data = data.filter(r=> !( (r['Address 1']||'').toLowerCase().includes(keyword.toLowerCase()) ));
-      }
-
-      // 4. Remove entries by specific street in Address 1
-      for(const street of ADDRESS1_REMOVE_STREETS){
-        data = data.filter(r=> !( (r['Address 1']||'').toLowerCase().includes(street.toLowerCase()) ));
-      }
-
-      // 5. Remove employee-tagged entries
-      data = data.filter(r=> !NAME_TAG_REMOVE.test(r['Customer Name'] || ''));
-
-      // 6. Strip *C (or other) tags from Customer Name
-      data = data.map(r=> ({...r, 'Customer Name': (r['Customer Name']||'').replace(NAME_TAG_STRIP,'')}));
-
-      // 7. Move Address 2 -> Address 1 when Address 1 blank
-      data = data.map(r=>{
-        const a1 = (r['Address 1']||'').trim();
-        const a2 = (r['Address 2']||'').trim();
-        if((a1==='') && a2!==''){ return {...r, 'Address 1': a2, 'Address 2': ''}; }
-        return r;
-      });
-
-      // 8. Clear Address 2 where Address 1 is a PO Box
-      data = data.map(r=>{
-        const a1 = r['Address 1']||'';
-        const a2 = r['Address 2']||'';
-        if(/PO BOX/i.test(a1) && a2.trim()!==''){
-          return {...r, 'Address 2': ''};
-        }
-        return r;
-      });
-
-      // 9. Deduplicate by Customer Number — keep entry with email if available
-      // Build map of customer number -> best row
-      const map = new Map();
-      for(const r of data){
-        const key = (r['Customer Number']||'').trim();
-        if(key===''){
-          // keep as-is (use unique id)
-          const uid = Symbol(); map.set(uid, r); continue;
-        }
-        const hasEmail = (r['Email Address']||'').trim()!=='';
-        if(!map.has(key)) { map.set(key, r); }
-        else {
-          const existing = map.get(key);
-          const existingHasEmail = ((existing['Email Address']||'').trim()!=='');
-          // prefer row with email
-          if(!existingHasEmail && hasEmail) map.set(key, r);
-        }
-      }
-
-      const final = Array.from(map.values());
-
-      return {initialCount, finalCount: final.length, rows: final};
-    }
-
-    // UI wiring
-    const fileInput = document.getElementById('file');
-    const processBtn = document.getElementById('process');
-    const downloadBtn = document.getElementById('download');
-    const status = document.getElementById('status');
+    const fileInput = document.getElementById('fileInput');
+    const processBtn = document.getElementById('processBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const stats = document.getElementById('stats');
     const preview = document.getElementById('preview');
-    const counts = document.getElementById('counts');
-    let lastCSV = null;
 
-    processBtn.addEventListener('click', async ()=>{
-      status.textContent = '';
-      const f = fileInput.files[0];
-      if(!f){ status.textContent = 'Choose a CSV file first'; return; }
-      const text = await f.text();
-      const {headers, rows} = csvToArray(text);
-      if(headers.length===0){ status.textContent = 'No data found in CSV'; return; }
-      const result = processRows(headers, rows);
-      counts.textContent = `Starting rows: ${result.initialCount} — Final rows: ${result.finalCount}`;
-      // render preview table (first 100 rows)
-      const show = result.rows.slice(0,100);
-      if(show.length===0){ preview.innerHTML = '<p>No rows after cleaning.</p>'; }
-      else {
-        const tbl = document.createElement('table');
-        const thead = document.createElement('thead');
-        const trh = document.createElement('tr');
-        headers.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; trh.appendChild(th); });
-        thead.appendChild(trh); tbl.appendChild(thead);
-        const tbody = document.createElement('tbody');
-        for(const r of show){ const tr = document.createElement('tr'); headers.forEach(h=>{ const td=document.createElement('td'); td.textContent = r[h] ?? ''; tr.appendChild(td); }); tbody.appendChild(tr); }
-        tbl.appendChild(tbody);
-        preview.innerHTML = '';
-        preview.appendChild(tbl);
-      }
-      lastCSV = arrayToCSV(headers, result.rows);
-      downloadBtn.disabled = false;
-      status.textContent = 'Done';
+    let parsedRows = [];
+    let headers = [];
+    let cleanedRows = [];
+
+    fileInput.addEventListener('change', () => {
+      processBtn.disabled = !fileInput.files.length;
+      downloadBtn.disabled = true;
+      stats.textContent = '';
+      preview.innerHTML = '';
     });
 
-    downloadBtn.addEventListener('click', ()=>{
-      if(!lastCSV) return;
-      const blob = new Blob([lastCSV], {type: 'text/csv;charset=utf-8'});
+    processBtn.addEventListener('click', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      stats.textContent = 'Parsing CSV...';
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: false,
+        dynamicTyping: false,
+        complete: result => {
+          headers = result.meta.fields || [];
+          parsedRows = result.data || [];
+          stats.textContent = `Parsed ${parsedRows.length} rows (headers: ${headers.join(', ') || '[none]'})`;
+          cleanedRows = cleanRows(parsedRows, headers);
+          showPreview(cleanedRows, headers);
+          downloadBtn.disabled = false;
+          stats.innerHTML = `${stats.innerHTML}<br>Cleaned rows: ${cleanedRows.length}`;
+        },
+        error: err => {
+          stats.textContent = 'Error parsing CSV: ' + err.message;
+        }
+      });
+    });
+
+    resetBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      parsedRows = [];
+      cleanedRows = [];
+      headers = [];
+      processBtn.disabled = true;
+      downloadBtn.disabled = true;
+      stats.textContent = '';
+      preview.innerHTML = '';
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (!cleanedRows.length) return;
+      const csv = Papa.unparse({fields: headers, data: cleanedRows});
+      const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'mailing_list_cleaned.csv';
-      document.body.appendChild(a); a.click(); a.remove();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       URL.revokeObjectURL(url);
     });
+
+    // Cleaning logic
+    function cleanRows(rows, hdrs){
+      // Normalize header names we expect; fallback to common variants
+      const field = f => {
+        const map = hdrs.reduce((m,k)=>{m[k.toLowerCase().trim()]=k; return m;}, {});
+        const keys = Object.keys(map);
+        const lookup = name => map[name.toLowerCase()] || map[name.toLowerCase().replace(/\s+/g,' ')] || null;
+        return lookup(f.toLowerCase()) || lookup(f) || f;
+      };
+      const FN = {
+        num: field('Customer Number'),
+        name: field('Customer Name'),
+        a1: field('Address 1'),
+        a2: field('Address 2'),
+        email: field('Email Address')
+      };
+
+      // 1) remove blank rows (all fields empty)
+      let filtered = rows.filter(r => {
+        return Object.values(r).some(v => (v !== null && v !== undefined && String(v).trim() !== ''));
+      });
+
+      // 2) remove full duplicate rows (exact same content)
+      const seenFull = new Set();
+      filtered = filtered.filter(r => {
+        const key = JSON.stringify(r);
+        if (seenFull.has(key)) return false;
+        seenFull.add(key);
+        return true;
+      });
+
+      // 3) filter by Address 1 keywords / streets
+      filtered = filtered.filter(r => {
+        const a1 = String(r[FN.a1] || '').toUpperCase();
+        if (!a1) return true;
+        for (const kw of ADDRESS1_REMOVE_KEYWORDS) {
+          if (a1.includes(kw.toUpperCase())) return false;
+        }
+        for (const st of ADDRESS1_REMOVE_STREETS) {
+          if (a1.includes(st.toUpperCase())) return false;
+        }
+        return true;
+      });
+
+      // 4) remove rows where Customer Name matches NAME_TAG_REMOVE
+      filtered = filtered.filter(r => {
+        const nm = String(r[FN.name] || '').toUpperCase();
+        if (!nm) return true;
+        for (const t of NAME_TAG_REMOVE) {
+          if (nm.includes(t.toUpperCase())) return false;
+        }
+        return true;
+      });
+
+      // 5) strip NAME_TAG_STRIP substrings from Customer Name
+      filtered.forEach(r => {
+        let nm = String(r[FN.name] || '');
+        for (const s of NAME_TAG_STRIP) {
+          nm = nm.split(s).join('').trim();
+        }
+        r[FN.name] = nm;
+      });
+
+      // 6) Move Address2 -> Address1 if Address1 empty
+      filtered.forEach(r => {
+        const a1 = String(r[FN.a1] || '').trim();
+        const a2 = String(r[FN.a2] || '').trim();
+        if ((!a1 || a1 === '') && a2) {
+          r[FN.a1] = a2;
+          r[FN.a2] = '';
+        }
+      });
+
+      // 7) If Address1 contains PO BOX and Address2 present, clear Address2
+      filtered.forEach(r => {
+        const a1 = String(r[FN.a1] || '');
+        const a2 = String(r[FN.a2] || '');
+        if (a2) {
+          for (const pat of PO_BOX_PATTERNS) {
+            if (pat.test(a1)) {
+              r[FN.a2] = '';
+              break;
+            }
+          }
+        }
+      });
+
+      // 8) Deduplicate by Customer Number, prefer row with Email Address
+      const groups = new Map();
+      filtered.forEach(r => {
+        const id = String(r[FN.num] || '').trim();
+        if (!id) {
+          // keep rows without Customer Number as-is, use unique key
+          const tempKey = `__noid__${Math.random().toString(36).slice(2,9)}`;
+          groups.set(tempKey, r);
+          return;
+        }
+        if (!groups.has(id)) groups.set(id, r);
+        else {
+          const existing = groups.get(id);
+          const existingHasEmail = String(existing[FN.email] || '').trim() !== '';
+          const rHasEmail = String(r[FN.email] || '').trim() !== '';
+          if (!existingHasEmail && rHasEmail) groups.set(id, r); // prefer email
+        }
+      });
+
+      // Build final array in original order as much as possible
+      const final = [];
+      const used = new Set();
+      filtered.forEach(r => {
+        const id = String(r[FN.num] || '').trim();
+        if (!id) {
+          // unique key rows were inserted in groups with random keys; include them
+          const key = [...groups.entries()].find(([k,v]) => v === r)?.[0];
+          if (key && !used.has(key)) { final.push(r); used.add(key); }
+          return;
+        }
+        const groupRow = groups.get(id);
+        if (groupRow && !used.has(id)) {
+          final.push(groupRow);
+          used.add(id);
+        }
+      });
+
+      // If headers had extra fields not in rows, ensure output keys match original header order
+      return final;
+    }
+
+    function showPreview(rows, hdrs){
+      preview.innerHTML = '';
+      if (!rows.length){
+        preview.innerHTML = '<p>No rows after cleaning.</p>';
+        return;
+      }
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const trh = document.createElement('tr');
+      // Use headers from parsed file if available, else infer from first row
+      const cols = hdrs.length ? hdrs : Object.keys(rows[0]);
+      cols.forEach(c => {
+        const th = document.createElement('th'); th.textContent = c; trh.appendChild(th);
+      });
+      thead.appendChild(trh);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      const max = Math.min(rows.length, 100);
+      for (let i=0;i<max;i++){
+        const r = rows[i];
+        const tr = document.createElement('tr');
+        cols.forEach(c => {
+          const td = document.createElement('td');
+          td.textContent = r[c] !== undefined ? r[c] : '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      preview.appendChild(table);
+      if (rows.length > 100){
+        const p = document.createElement('p');
+        p.textContent = `Showing first 100 of ${rows.length} rows.`;
+        preview.appendChild(p);
+      }
+    }
   </script>
 </body>
 </html>
