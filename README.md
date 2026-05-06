@@ -1,4 +1,4 @@
-# Clean Mailing List — HTML version
+# Mailing List Cleaner
 
 - This folder contains a browser-based HTML tool `clean_mailing_list.html` that performs mailing list cleaning client-side.
 
